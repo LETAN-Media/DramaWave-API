@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: dramawave-api
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: LOG_LEVEL
+        value: INFO
+      - key: API_TOKEN
+        sync: false
