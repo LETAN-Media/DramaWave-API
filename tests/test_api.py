@@ -199,3 +199,27 @@ def test_redacted_logging():
 
     assert redact_url('https://cdn.example.com/v/x.m3u8?sig=SECRET&exp=1') == 'https://cdn.example.com/v/x.m3u8'
     assert 'SECRET' not in redact_url('https://cdn.example.com/v/x.m3u8?sig=SECRET')
+
+
+def test_audio_track_parsing():
+    from app.dramawave.playback import parse_audio_tracks, select_audio_track
+
+    master = ('#EXTM3U\n'
+              '#EXT-X-MEDIA:TYPE=AUDIO,URI="en.m3u8",GROUP-ID="g",NAME="en-US",LANGUAGE="en-US",DEFAULT=NO,AUTOSELECT=YES,CHANNELS="2"\n'
+              '#EXT-X-MEDIA:TYPE=AUDIO,URI="zh.m3u8",GROUP-ID="g",NAME="zh-CN",LANGUAGE="zh-CN",DEFAULT=NO,AUTOSELECT=NO,CHANNELS="2"\n')
+    import app.dramawave.playback as pb_mod
+
+    class FakeResp:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self): return master.encode()
+
+    orig = pb_mod.urllib.request.urlopen
+    pb_mod.urllib.request.urlopen = lambda req, timeout=None: FakeResp()
+    try:
+        tracks = parse_audio_tracks('https://cdn.example.com/master.m3u8')
+    finally:
+        pb_mod.urllib.request.urlopen = orig
+    assert len(tracks) == 2
+    assert select_audio_track(tracks)['language'] == 'zh-CN'
+    assert select_audio_track([tracks[0]])['language'] == 'en-US'

@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Query
 from app.cache import cache
 from app.config import settings
 from app.dramawave import domain
-from app.models import EpisodeItem, PlaybackResponse, QualityVariant
+from app.models import AudioTrack, EpisodeItem, PlaybackResponse, QualityVariant
 from app.security import require_api_token
 
 router = APIRouter(dependencies=[Depends(require_api_token)])
@@ -42,6 +42,10 @@ def get_playback(episode_id: str, series_id: str = Query(description='Parent ser
     if isinstance(hit, dict):
         return PlaybackResponse(**hit)
     pb = domain.get_playback(series_id, episode_id, quality)
-    out = {**pb, 'available_qualities': [QualityVariant(**v).model_dump() for v in pb['available_qualities']]}
+    from app.models import AudioTrack
+
+    out = {**pb,
+           'audio_tracks': [AudioTrack(**t).model_dump() for t in pb.get('audio_tracks', [])],
+           'available_qualities': [QualityVariant(**v).model_dump() for v in pb['available_qualities']]}
     cache.set(key, out, settings.cache_playback_ttl)
     return PlaybackResponse(**out)

@@ -70,6 +70,50 @@ def select_quality(variants: list[dict], quality: str) -> dict:
     return min(variants, key=short)
 
 
+def parse_audio_tracks(master_url: str, timeout: int | None = None) -> list[dict]:
+    """Parse EXT-X-MEDIA audio renditions (no media download)."""
+    import urllib.request
+
+    from app.config import settings as _settings
+
+    req = urllib.request.Request(master_url, headers={'User-Agent': 'Mozilla/5.0'})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout or _settings.dramawave_timeout) as resp:
+            text = resp.read().decode('utf-8', 'replace')
+    except Exception as exc:
+        raise DramaWaveError('DRAMAWAVE_UPSTREAM_ERROR', f'audio track fetch {type(exc).__name__}')
+    tracks = []
+    for line in text.splitlines():
+        if not line.startswith('#EXT-X-MEDIA') or 'TYPE=AUDIO' not in line:
+            continue
+        uri = re.search(r'URI="([^"]+)"', line)
+        lang = re.search(r'LANGUAGE="([^"]+)"', line)
+        name = re.search(r'NAME="([^"]+)"', line)
+        if not uri:
+            continue
+        tracks.append({
+            'language': lang.group(1) if lang else None,
+            'name': name.group(1) if name else None,
+            'default': 'DEFAULT=YES' in line,
+            'url': urllib.parse.urljoin(master_url, uri.group(1)),
+        })
+    return tracks
+
+
+def select_audio_track(tracks: list[dict]) -> dict | None:
+    """Prefer original Chinese, then flagged default, then first."""
+    if not tracks:
+        return None
+    for track in tracks:
+        lang = (track.get('language') or '').lower()
+        if lang.startswith('zh') or 'chinese' in lang or 'cmn' in lang:
+            return track
+    for track in tracks:
+        if track.get('default'):
+            return track
+    return tracks[0]
+
+
 def get_playback(series_id: str, episode_id: str, quality: str = 'best') -> dict:
     ep = get_episode(series_id, episode_id)
     if ep['locked']:
@@ -86,7 +130,19 @@ def get_playback(series_id: str, episode_id: str, quality: str = 'best') -> dict
         raise DramaWaveError('DRAMAWAVE_PLAYBACK_NOT_FOUND', 'unsupported playback')
     variants = parse_master_variants(url)
     chosen = select_quality(variants, quality)
+    audio_tracks = []
+    audio_choice = None
+    try:
+        audio_tracks = parse_audio_tracks(url)
+        audio_choice = select_audio_track(audio_tracks)
+    except DramaWaveError:
+        audio_tracks = []
     public_variants = [{k: v[k] for k in ('quality', 'width', 'height', 'fps', 'url')} for v in variants]
+    public_tracks = [{k: t[k] for k in ('language', 'name', 'default', 'url')} for t in audio_tracks]
     return {'episode_id': episode_id, 'duration': ep['duration'], 'type': 'hls',
             'codec': 'h264', 'quality': chosen['quality'], 'url': chosen['url'],
+            'master_url': url,
+            'audio_url': (audio_choice or {}).get('url'),
+            'audio_language': (audio_choice or {}).get('language'),
+            'audio_tracks': public_tracks,
             'available_qualities': public_variants}

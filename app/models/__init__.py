@@ -49,6 +49,13 @@ class QualityVariant(BaseModel):
     url: str
 
 
+class AudioTrack(BaseModel):
+    language: str | None = None
+    name: str | None = None
+    default: bool = False
+    url: str
+
+
 class PlaybackResponse(BaseModel):
     episode_id: str
     duration: float | None = None
@@ -56,6 +63,10 @@ class PlaybackResponse(BaseModel):
     codec: str
     quality: str
     url: str
+    master_url: str | None = None
+    audio_url: str | None = None
+    audio_language: str | None = None
+    audio_tracks: list[AudioTrack] = Field(default_factory=list)
     available_qualities: list[QualityVariant] = Field(default_factory=list)
 
 
