@@ -87,10 +87,15 @@ def test_stub_providers_not_implemented():
     from app.providers.netshort.provider import NetShortProvider
     from app.providers.dramabox.provider import DramaBoxProvider
     from app.providers.shortflix.provider import ShortFlixProvider
-    for cls in [NetShortProvider, DramaBoxProvider, ShortFlixProvider]:
+    for cls in [DramaBoxProvider, ShortFlixProvider]:
         p = cls()
         assert p.capabilities['search'] is False
         assert p.capabilities['playback'] is False
+    p = NetShortProvider()
+    assert p.capabilities['search'] is True
+    assert p.capabilities['series'] is True
+    assert p.capabilities['episodes'] is False
+    assert p.capabilities['playback'] is False
 
 
 def test_health_tracking():
