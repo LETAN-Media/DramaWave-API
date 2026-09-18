@@ -85,9 +85,8 @@ def test_dramawave_provider_capabilities():
 
 def test_stub_providers_not_implemented():
     from app.providers.netshort.provider import NetShortProvider
-    from app.providers.dramabox.provider import DramaBoxProvider
     from app.providers.shortflix.provider import ShortFlixProvider
-    for cls in [DramaBoxProvider, ShortFlixProvider]:
+    for cls in [ShortFlixProvider]:
         p = cls()
         assert p.capabilities['search'] is False
         assert p.capabilities['playback'] is False
