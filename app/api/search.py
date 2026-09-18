@@ -1,4 +1,4 @@
-"""Search route."""
+"""Search route: original DramaWave search + new search-all."""
 
 from fastapi import APIRouter, Depends, Query
 

@@ -11,13 +11,23 @@ import time
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from app.api import episodes, health, search, series
+from app.api import canonical, episodes, health, search, series
 from app.config import settings
 from app.errors import DramaWaveError, dramawave_error_handler
+from app.providers.dramabox.provider import DramaBoxProvider
+from app.providers.dramawave.provider import DramaWaveProvider
+from app.providers.netshort.provider import NetShortProvider
+from app.providers.registry import register
+from app.providers.shortflix.provider import ShortFlixProvider
 
 logging.basicConfig(level=settings.log_level,
                     format='%(asctime)s %(levelname)s %(name)s %(message)s')
 logger = logging.getLogger('dramawave-api')
+
+register(DramaWaveProvider())
+register(NetShortProvider())
+register(DramaBoxProvider())
+register(ShortFlixProvider())
 
 app = FastAPI(title='DramaWave Resolver API', version=settings.version)
 app.add_exception_handler(DramaWaveError, dramawave_error_handler)
@@ -25,6 +35,7 @@ app.include_router(health.router)
 app.include_router(search.router)
 app.include_router(series.router)
 app.include_router(episodes.router)
+app.include_router(canonical.router)
 
 
 @app.middleware('http')

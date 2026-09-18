@@ -20,9 +20,12 @@ class Settings(BaseSettings):
     dramawave_timeout: int = 20
     dramawave_max_retries: int = 2
 
-    cache_search_ttl: int = 120
-    cache_series_ttl: int = 300
-    cache_episodes_ttl: int = 300
+    provider_priority: str = 'dramawave,netshort,dramabox,shortflix'
+    series_match_threshold: float = 0.82
+
+    cache_search_ttl: int = 300
+    cache_series_ttl: int = 1800
+    cache_episodes_ttl: int = 1800
     cache_playback_ttl: int = 120
 
 
