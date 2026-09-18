@@ -118,6 +118,7 @@ def _app():
 def test_providers_status_endpoint():
     client = TestClient(_app())
     r = client.get('/v1/providers')
+    print(r.json())
     assert r.status_code == 200
     body = r.json()
     assert 'providers' in body
@@ -128,6 +129,7 @@ def test_providers_status_endpoint():
 def test_provider_capabilities_in_status():
     client = TestClient(_app())
     r = client.get('/v1/providers/status')
+    print(r.json())
     assert r.status_code == 200
     dw = next(p for p in r.json()['providers'] if p['provider'] == 'dramawave')
     assert dw['capabilities']['search'] is True
@@ -157,6 +159,7 @@ def test_search_all_endpoint(monkeypatch):
 
     monkeypatch.setattr(client_mod.urllib.request, 'urlopen', fake_urlopen)
     r = client.get('/v1/search-all', params={'q': 'dragon'})
+    print(r.json())
     assert r.status_code == 200
     body = r.json()
     assert 'items' in body
@@ -186,6 +189,7 @@ def test_legacy_search_still_works(monkeypatch):
 
     monkeypatch.setattr(client_mod.urllib.request, 'urlopen', fake_urlopen)
     r = client.get('/v1/search', params={'q': 'dragon'})
+    print(r.json())
     assert r.status_code == 200
     body = r.json()
     assert body['items'][0]['series_id'] == 'S1'
@@ -194,6 +198,7 @@ def test_legacy_search_still_works(monkeypatch):
 def test_providers_status_has_capabilities():
     client = TestClient(_app())
     r = client.get('/v1/providers/status')
+    print(r.json())
     assert r.status_code == 200
     body = r.json()
     for p in body['providers']:

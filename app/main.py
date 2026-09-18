@@ -19,6 +19,8 @@ from app.providers.dramawave.provider import DramaWaveProvider
 from app.providers.netshort.provider import NetShortProvider
 from app.providers.registry import register
 from app.providers.shortflix.provider import ShortFlixProvider
+from app.providers.reelshort.provider import ReelShortProvider
+from app.providers.goodshort.provider import GoodShortProvider
 
 logging.basicConfig(level=settings.log_level,
                     format='%(asctime)s %(levelname)s %(name)s %(message)s')
@@ -28,6 +30,8 @@ register(DramaWaveProvider())
 register(NetShortProvider())
 register(DramaBoxProvider())
 register(ShortFlixProvider())
+register(ReelShortProvider())
+register(GoodShortProvider())
 
 app = FastAPI(title='DramaWave Resolver API', version=settings.version)
 app.add_exception_handler(DramaWaveError, dramawave_error_handler)

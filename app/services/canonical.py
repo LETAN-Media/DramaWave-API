@@ -123,18 +123,29 @@ def get_store() -> CanonicalStore:
 
 
 async def search_all(query: str) -> list[dict]:
-    results: list[dict] = []
+    import asyncio
+    
     seen_series: dict[str, ProviderSeries] = {}
-
-    for provider in all_providers():
-        if not provider.capabilities.get(ProviderCapability.SEARCH, False):
-            continue
+    searchable_providers = [p for p in all_providers() if p.capabilities.get(ProviderCapability.SEARCH, False)]
+    
+    async def _search_provider(provider):
         try:
-            items = await provider.search(query)
+            return await provider.search(query)
         except Exception as exc:
             logger.warning('search failed provider=%s query=%s err=%s', provider.name, query, exc)
+            return []
+            
+    # Run searches concurrently with a limit
+    sem = asyncio.Semaphore(4)
+    async def _limited_search(provider):
+        async with sem:
+            return await _search_provider(provider)
+            
+    results_list = await asyncio.gather(*[_limited_search(p) for p in searchable_providers], return_exceptions=True)
+    
+    for items in results_list:
+        if isinstance(items, Exception):
             continue
-
         for item in items:
             norm = normalize_title(item.title or '')
             if not norm:
@@ -143,55 +154,42 @@ async def search_all(query: str) -> list[dict]:
                 existing = seen_series[norm]
                 if item.provider != existing.provider:
                     _store.upsert_mapping(SeriesProviderMapping(
-                        canonical_series_id='',
+                        canonical_series_id=f"cw:{norm}",
                         provider=item.provider,
                         provider_series_id=item.provider_series_id,
                         provider_title=item.title,
                         episode_count=item.episode_count,
+                        match_score=1.0,
+                        verified=True
                     ))
-                continue
-            seen_series[norm] = item
-            canonical_id = f'cw:{norm}'
-            cs = CanonicalSeries(
-                id=canonical_id,
-                canonical_title=item.title or '',
-                aliases=item.aliases or alias_variants(item.title or ''),
-                cover_url=item.cover_url,
-                episode_count=item.episode_count,
-                language=item.language,
-            )
-            _store._series[canonical_id] = cs
-            _store.upsert_mapping(SeriesProviderMapping(
-                canonical_series_id=canonical_id,
-                provider=item.provider,
-                provider_series_id=item.provider_series_id,
-                provider_title=item.title,
-                episode_count=item.episode_count,
-                match_score=1.0,
-                verified=True,
-            ))
+            else:
+                seen_series[norm] = item
+                _store.upsert_mapping(SeriesProviderMapping(
+                    canonical_series_id=f"cw:{norm}",
+                    provider=item.provider,
+                    provider_series_id=item.provider_series_id,
+                    provider_title=item.title,
+                    episode_count=item.episode_count,
+                    match_score=1.0,
+                    verified=True
+                ))
+                cs = CanonicalSeries(
+                    id=f"cw:{norm}",
+                    canonical_title=item.title or '',
+                    cover_url=item.cover_url,
+                    episode_count=item.episode_count,
+                    language=item.language,
+                    aliases=item.aliases
+                )
+                _store._series[f"cw:{norm}"] = cs
 
-    for canonical_id, cs in _store._series.items():
-        mappings = _store.get_mappings(canonical_id)
-        usable = _count_usable_episodes(canonical_id)
-        results.append({
-            'canonical_series_id': canonical_id,
-            'canonical_title': cs.canonical_title,
-            'aliases': cs.aliases,
-            'episode_count': cs.episode_count,
-            'usable_episode_count': usable,
-            'providers': [
-                {
-                    'provider': m.provider,
-                    'provider_series_id': m.provider_series_id,
-                    'title': m.provider_title,
-                    'episode_count': m.episode_count,
-                    'match_score': m.match_score,
-                }
-                for m in mappings
-            ],
-        })
-    return results
+    out = []
+    for norm in seen_series.keys():
+        cid = f"cw:{norm}"
+        if cid in _store._series:
+            out.append(await get_canonical_series(cid))
+            
+    return [c.model_dump() if hasattr(c, 'model_dump') else c for c in out if c]
 
 
 async def get_canonical_series(canonical_id: str) -> dict | None:
@@ -247,33 +245,63 @@ async def resolve_best_source(
     episode_number: int,
     quality: str = 'best',
 ) -> dict | None:
+    import asyncio
     sources = _store.get_episode_sources(canonical_id, episode_number)
     if not sources:
         return None
+        
     priority = ordered_names()
-    def sort_key(s):
+    def get_priority(s):
         try:
             return priority.index(s.provider)
         except ValueError:
             return len(priority)
-    sorted_sources = sorted(sources, key=sort_key)
-    for s in sorted_sources:
-        if s.locked or not s.free or not s.playback_available:
-            continue
+            
+    free_sources = [s for s in sources if not s.locked and s.free and s.playback_available]
+    if not free_sources:
+        return None
+        
+    # We will resolve all free sources concurrently
+    async def try_resolve(s):
         provider = get(s.provider)
         if provider is None:
-            continue
-        pb = await provider.resolve_playback(s.provider_episode_id, s.provider_series_id, quality)
-        if pb and pb.url:
-            return {
-                'selected_provider': s.provider,
-                'provider_series_id': s.provider_series_id,
-                'provider_episode_id': s.provider_episode_id,
-                'episode_number': episode_number,
-                'playback': pb,
-            }
-    return None
+            return None
+        try:
+            pb = await provider.resolve_playback(s.provider_episode_id, s.provider_series_id, quality)
+            if pb and pb.url:
+                return (s, pb)
+        except Exception as exc:
+            logger.warning('resolve failed provider=%s err=%s', s.provider, exc)
+        return None
 
+    results = await asyncio.gather(*[try_resolve(s) for s in free_sources])
+    valid_results = [r for r in results if r is not None]
+    
+    if not valid_results:
+        return None
+        
+    # Sort by quality, then priority
+    def quality_score(q_str):
+        q_str = str(q_str).lower()
+        if '1080' in q_str: return 1080
+        if '720' in q_str: return 720
+        if '480' in q_str: return 480
+        if '360' in q_str: return 360
+        return 0
+
+    valid_results.sort(key=lambda r: (
+        -quality_score(r[1].quality),  # higher quality first
+        get_priority(r[0])             # lower priority index first
+    ))
+    
+    best_s, best_pb = valid_results[0]
+    return {
+        'selected_provider': best_s.provider,
+        'provider_series_id': best_s.provider_series_id,
+        'provider_episode_id': best_s.provider_episode_id,
+        'episode_number': episode_number,
+        'playback': best_pb,
+    }
 
 def _count_usable_episodes(canonical_id: str) -> int:
     by_ep = _store._episode_sources.get(canonical_id, {})
