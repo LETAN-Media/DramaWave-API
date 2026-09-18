@@ -9,6 +9,7 @@ from typing import Any
 
 from app.models.provider import CanonicalSeries, EpisodeSource, SeriesProviderMapping
 from app.providers.base import ProviderCapability, ProviderEpisode, ProviderSeries
+from app.models.provider import CanonicalSeries
 from app.providers.registry import all_providers, get, ordered_names
 from app.services.normalize import alias_variants, normalize_title
 from app.errors import DramaWaveError
@@ -143,8 +144,10 @@ async def search_all(query: str) -> list[dict]:
             
     results_list = await asyncio.gather(*[_limited_search(p) for p in searchable_providers], return_exceptions=True)
     
+    
     for items in results_list:
         if isinstance(items, Exception):
+            print("Exception from provider:", items)
             continue
         for item in items:
             norm = normalize_title(item.title or '')
@@ -164,13 +167,24 @@ async def search_all(query: str) -> list[dict]:
                     ))
             else:
                 seen_series[norm] = item
+                cid = f"cw:{norm}"
+                if cid not in _store._series:
+                    
+                    _store._series[cid] = CanonicalSeries(
+                        id=cid,
+                        canonical_title=item.title,
+                        cover_url=item.cover_url,
+                        episode_count=item.episode_count,
+                        aliases=item.aliases
+                    )
                 _store.upsert_mapping(SeriesProviderMapping(
-                    canonical_series_id=f"cw:{norm}",
+                    canonical_series_id=cid,
                     provider=item.provider,
                     provider_series_id=item.provider_series_id,
                     provider_title=item.title,
                     episode_count=item.episode_count,
                     match_score=1.0,
+
                     verified=True
                 ))
                 cs = CanonicalSeries(
@@ -184,11 +198,16 @@ async def search_all(query: str) -> list[dict]:
                 _store._series[f"cw:{norm}"] = cs
 
     out = []
+    print('seen_series count:', len(seen_series))
+    
     for norm in seen_series.keys():
         cid = f"cw:{norm}"
         if cid in _store._series:
-            out.append(await get_canonical_series(cid))
+            c = await get_canonical_series(cid)
             
+            out.append(c)
+            
+    print('out count:', len(out))
     return [c.model_dump() if hasattr(c, 'model_dump') else c for c in out if c]
 
 
@@ -225,6 +244,7 @@ async def get_canonical_series(canonical_id: str) -> dict | None:
 async def get_episode_sources(canonical_id: str, episode_number: int) -> list[dict]:
     sources = _store.get_episode_sources(canonical_id, episode_number)
     out = []
+    print('seen_series count:', len(seen_series))
     for s in sources:
         out.append({
             'provider': s.provider,
