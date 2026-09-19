@@ -34,21 +34,23 @@ def list_episodes(series_id: str):
         hit = cache.get(key)
         if isinstance(hit, list):
             return {'series_id': series_id, 'total': len(hit), 'episodes': hit}
+        
         all_eps: dict[int, dict] = {}
-        for m in mappings:
-            try:
-                eps = dw_domain.list_episodes(m.provider_series_id)
-            except Exception:
-                continue
-            for ep in eps:
-                ep_num = ep['episode_number']
-                if ep_num not in all_eps:
-                    all_eps[ep_num] = {'episode_number': ep_num, 'sources': []}
+        # Make sure we use the correct providers!
+        asyncio.get_event_loop().run_until_complete(refresh_series_sources(series_id))
+        sources_map = store.get_episode_sources(series_id, None) or {}
+        # Wait, get_episode_sources takes episode_number!
+        # It's better to access _episode_sources map directly:
+        sources_map = store._episode_sources.get(series_id, {})
+        for ep_num, sources in sources_map.items():
+            all_eps[ep_num] = {'episode_number': ep_num, 'sources': []}
+            for s in sources:
                 all_eps[ep_num]['sources'].append({
-                    'provider': m.provider,
-                    'status': 'free' if not ep['locked'] else 'locked',
-                    'locked': ep['locked'],
+                    'provider': s.provider,
+                    'status': 'free' if s.free else 'locked',
+                    'locked': s.locked or not s.playback_available,
                 })
+
         eps_out = sorted(all_eps.values(), key=lambda x: x['episode_number'])
         cache.set(key, eps_out, settings.cache_episodes_ttl)
         return {'series_id': series_id, 'total': len(eps_out), 'episodes': eps_out}
